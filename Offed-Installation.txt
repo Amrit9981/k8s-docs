@@ -1,0 +1,36 @@
+Ofed Installation
+=========================================
+root@dgxnode1:/home/nicaird# ls
+MLNX_OFED_LINUX-23.10-1.1.9.0-ubuntu22.04-x86_64      NDCSP_Qualys_Agent_Linux_Debian
+MLNX_OFED_LINUX-23.10-1.1.9.0-ubuntu22.04-x86_64.tgz
+
+root@dgxnode1:/home/nicaird# tar -xzvf MLNX_OFED_LINUX-23.10-1.1.9.0-ubuntu22.04-x86_64.tgz
+MLNX_OFED_LINUX-23.10-1.1.9.0-ubuntu22.04-x86_64      NDCSP_Qualys_Agent_Linux_Debian
+MLNX_OFED_LINUX-23.10-1.1.9.0-ubuntu22.04-x86_64.tgz
+
+root@dgxnode1:/home/nicaird# mkdir -p /tmp/my_fw_bin_files
+
+root@dgxnode1:/home/nicaird# cp -r MLNX_OFED_LINUX-23.10-1.1.9.0-ubuntu22.04-x86_64  /tmp/my_fw_bin_files
+
+root@dgxnode1:/home/nicaird# ls
+MLNX_OFED_LINUX-23.10-1.1.9.0-ubuntu22.04-x86_64      NDCSP_Qualys_Agent_Linux_Debian
+MLNX_OFED_LINUX-23.10-1.1.9.0-ubuntu22.04-x86_64.tgz
+
+root@dgxnode1:/home/nicaird# cd MLNX_OFED_LINUX-23.10-1.1.9.0-ubuntu22.04-x86_64
+
+root@dgxnode1:/home/nicaird/MLNX_OFED_LINUX-23.10-1.1.9.0-ubuntu22.04-x86_64# ls
+common_installers.pl            DEBS    LICENSE                     mlnx-ofed-keyring.gpg  uninstall.sh
+common.pl                       distro  mlnx_add_kernel_support.sh  RPM-GPG-KEY-Mellanox
+create_mlnx_ofed_installers.pl  docs    mlnxofedinstall             src
+
+root@dgxnode1:/home/nicaird# ./mlnxofedinstall --fw-image-dir /tmp/my_fw_bin_files
+root@dgxnode1:/home/nicaird#
+
+root@dgxnode1:/home/nicaird# /etc/init.d/openibd restart           # Restart the ofed
+root@dgxnode1:/home/nicaird# ofed_info
+root@dgxnode1:/home/nicaird# ofed_info -s
+root@dgxnode1:/home/nicaird# mst start
+root@dgxnode1:/home/nicaird# mst status
+root@dgxnode1:/home/nicaird# mst status -v
+root@dgxnode1:/home/nicaird# ibv_devinfo | grep -e "hca_id\|link_layer"                    # To determine the current port configuration types 
+root@dgxnode1:/home/nicaird# mlxconfig -d /dev/mst/mt4123_pciconf8 set  LINK_TYPE_P1=1     # Switching the Port from Ethernet to InfiniBand

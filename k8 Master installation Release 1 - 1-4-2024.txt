@@ -1,0 +1,288 @@
+NIC Installation reference - https://www.cherryservers.com/blog/install-kubernetes-on-ubuntu
+
+
+
+Step 0: set date time and time zone
+=================================== 
+timedatectl list-timezones
+timedatectl set-timezone Asia/Kolkata
+sudo date --set="2024-01-16 21:13:20" (If not synching from time servers)
+sudo hwclock --show (hardware clock - just for reference)
+sudo hwclock -w (need to understand)
+
+
+Install NTP Server on master server:
+===================================
+apt install ntp
+systemctl status ntp
+nano /etc/ntp.conf
+ntpq -p  -->to see hitting servers
+
+Sync Clients with NTP Server:
+=============================
+
+nano /etc/systemd/timesyncd.conf
+
+[Time]
+NTP=192.168.100.63
+
+systemctl restart systemd-timesyncd
+systemctl status systemd-timesyncd
+timedatectl status
+
+Step 1: Disable swap
+++++++++++++++++++++
+
+sudo swapoff -a
+sudo sed -i '/ swap / s/^/#/' /etc/fstab
+
+Step 2: Set up hostnames
+++++++++++++++++++++++++
+
+sudo hostnamectl set-hostname "master-node"
+exec bash
+
+Step 3: Update the /etc/hosts File for Hostname Resolution
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+sudo nano /etc/hosts
+
+10.0.0.2 master-node  
+10.0.0.3 worker-node1
+
+Step 4: Set up the IPV4 bridge on all nodes
++++++++++++++++++++++++++++++++++++++++++++
+
+cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+overlay
+br_netfilter
+EOF
+
+sudo modprobe overlay
+sudo modprobe br_netfilter
+
+# sysctl params required by setup, params persist across reboots
+cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+EOF
+
+# Apply sysctl params without reboot
+sudo sysctl --system
+
+Step 5: Install Containerd - (CRI - Container Runtime Interface)
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+Choice 1: (Install Only Containerd through apt - Use CTR)
+=========================================================
+
+sudo apt install -y curl gnupg2 software-properties-common apt-transport-https ca-certificates
+
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmour -o /etc/apt/trusted.gpg.d/docker.gpg
+sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+
+sudo apt update
+sudo apt install -y containerd.io
+
+containerd config default | sudo tee /etc/containerd/config.toml >/dev/null 2>&1
+sudo sed -i 's/SystemdCgroup \= false/SystemdCgroup \= true/g' /etc/containerd/config.toml
+
+sudo systemctl restart containerd
+sudo systemctl enable containerd
+
+Choice 2: (Install nerdctl with all dependencies including containerd and build)
+=================================================================================
+
+(Refer "https://github.com/containerd/nerdctl/releases" for latest release)
+wget https://github.com/containerd/nerdctl/releases/download/v1.7.5/nerdctl-full-1.7.5-linux-amd64.tar.gz
+
+tar Cxzvvf /usr/local nerdctl-full-1.7.5-linux-amd64.tar.gz
+
+sudo systemctl enable --now containerd
+sudo systemctl enable --now buildkit
+
+sudo mkdir -p /etc/containerd/
+containerd config default | sudo tee /etc/containerd/config.toml
+sudo sed -i 's/SystemdCgroup \= false/SystemdCgroup \= true/g' /etc/containerd/config.toml
+
+sudo systemctl restart containerd
+
+Step 6: Install kubelet, kubeadm, and kubectl on each node
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+sudo apt-get update
+# apt-transport-https may be a dummy package; if so, you can skip that package
+sudo apt-get install -y apt-transport-https ca-certificates curl gpg
+
+# If the directory `/etc/apt/keyrings` does not exist, it should be created before the curl command, read the note below.
+sudo mkdir -p -m 755 /etc/apt/keyrings
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+# This overwrites any existing configuration in /etc/apt/sources.list.d/kubernetes.list
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+sudo apt-get update
+sudo apt-get install -y kubelet kubeadm kubectl
+sudo apt-mark hold kubelet kubeadm kubectl
+
+sudo systemctl enable --now kubelet
+
+Step 7: Initialize the Kubernetes cluster on the master node
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+sudo kubeadm config images pull
+
+sudo kubeadm init --pod-network-cidr=10.10.0.0/16
+
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+Step 8: Configure kubectl and Calico
+++++++++++++++++++++++++++++++++++++++++
+
+Choice 1: (Install Calico through Operator)
+===========================================
+
+ref: https://docs.tigera.io/calico/latest/getting-started/kubernetes/self-managed-onprem/onpremises
+
+kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/tigera-operator.yaml
+
+curl https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/custom-resources.yaml -O
+
+sed -i 's/cidr: 192\.168\.0\.0\/16/cidr: 10.10.0.0\/16/g' custom-resources.yaml
+
+kubectl create -f custom-resources.yaml
+
+Choice 2: (Install Calico through manifest file)
+================================================
+
+(Refere "https://docs.tigera.io/calico/latest/getting-started/kubernetes/self-managed-onprem/onpremises" for latest updates)
+
+kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.0/manifests/calico.yaml
+
+or
+
+curl https://raw.githubusercontent.com/projectcalico/calico/v3.27.2/manifests/calico.yaml -O
+kubectl apply -f calico.yaml
+
+Step 9: Add worker nodes to the cluster
++++++++++++++++++++++++++++++++++++++++++
+
+kubeadm token create --print-join-command
+
+copy the join command and run on worker nodes.
+
+
+Step 10: Verify the cluster and test
++++++++++++++++++++++++++++++++++++++++++
+
+kubectl get nodes
+kubectl get podes -A
+
+
+If GPU nodes are in cluster
+==============================
+
+
+Step 11: Install Helm
+=======================
+wget https://get.helm.sh/helm-v3.9.3-linux-amd64.tar.gz
+tar xvf helm-v3.9.3-linux-amd64.tar.gz
+sudo mv linux-amd64/helm /usr/local/bin
+rm helm-v3.9.3-linux-amd64.tar.gz
+rm -rf linux-amd64
+helm version
+
+
+
+https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/23.9.1/getting-started.html#pre-installed-nvidia-gpu-drivers-and-nvidia-container-toolkit
+
+Step 11: Nvidia GPU Operator installation
+=========================================
+
+
+
+https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#configuration
+
+
+sudo nvidia-ctk runtime configure --runtime=containerd
+
+
+
+https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/23.9.1/getting-started.html#pre-installed-nvidia-gpu-drivers-and-nvidia-container-toolkit
+
+
+helm repo add nvidia https://helm.ngc.nvidia.com/nvidia \
+    && helm repo update
+
+apt update
+helm repo update
+
+
+helm install --wait --generate-name \
+     -n gpu-operator --create-namespace \
+      nvidia/gpu-operator \
+      --set driver.enabled=false \
+      --set toolkit.enabled=false
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Search Available packages
++++++++++++++++++++++++++
+
+apt-cache madison docker-ce
+apt-cache madison kubeadm
+apt-cache madison kubectl
+apt-cache madison kubelet
+
+apt list -a kubeadm
+
+Search Installed packages
++++++++++++++++++++++++++
+
+apt list --installed
+dpkg -l | grep -i nvidia
+
+Remove nvidia packages
++++++++++++++++++++++++++
+sudo apt-get remove --purge '^nvidia-.*'
+
+apt update
+sudo apt install -y kubelet=1.26.5-00 kubeadm=1.26.5-00 kubectl=1.26.5-00
+-------------------------------------------------------
+https://forum.linuxfoundation.org/discussion/857536/mark-hold-kubernetes-cni
+
+sudo dpkg -l | grep kube
+apt-mark hold kubelet=1.26.5-00 kubeadm=1.26.5-00 kubectl=1.26.5-00 kubernetes-cni=1.2.0-00
+apt-mark hold kubernetes-cni=1.2.0-00
+-------------------------------------------------------
+systemctl daemon-reload
+systemctl restart containerd
+systemctl restart docker
+systemctl restart kubelet
+
+
+systemctl daemon-reload
+systemctl status containerd
+systemctl status docker
+systemctl status kubelet
+
+ps -ef | grep container
+
+

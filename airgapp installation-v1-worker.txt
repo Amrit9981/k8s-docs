@@ -1,0 +1,166 @@
+#Installing Depandencies
+#+++++++++++++++++++++
+
+
+sudo dpkg -i /root/k8-offline/general/*
+sleep 5s 
+
+
+#Installing helm
+#+++++++++++++++++++++++++
+
+cd /root/k8-offline/helm
+cd /root/k8-offline/helm
+
+tar xvf helm-v3.9.3-linux-amd64.tar.gz
+sudo mv linux-amd64/helm /usr/local/bin
+helm version
+sleep 5s 
+
+#Installing CRI - ContainerD & Nerdctl
+#++++++++++++++++++++++++++++++++++
+
+
+cd /root/k8-offline/cri
+
+#Choice 2: (Install nerdctl with all dependencies including containerd and build)
+#=================================================================================
+
+tar Cxzvvf /usr/local nerdctl-full-1.7.5-linux-amd64.tar.gz
+
+sudo systemctl enable --now containerd
+sudo systemctl enable --now buildkit
+
+sudo mkdir -p /etc/containerd/
+containerd config default | sudo tee /etc/containerd/config.toml
+sudo sed -i 's/SystemdCgroup \= false/SystemdCgroup \= true/g' /etc/containerd/config.toml
+
+sudo systemctl restart containerd
+
+#echo "Press any key to continue..."
+#read -s -n 1
+
+sleep 10s # Waits 5 seconds.
+
+
+#Step 6: Installing nvidia container toolkit 
+#===========================================
+
+
+dpkg -i libnvidia-container1_1.15.0-1_amd64.deb
+dpkg -i libnvidia-container-tools_1.15.0-1_amd64.deb
+dpkg -i nvidia-container-toolkit-base_1.15.0-1_amd64.deb
+dpkg -i nvidia-container-toolkit_1.15.0-1_amd64.deb
+dpkg -i nvidia-firmware-535-server-535.161.08_535.161.08-0ubuntu2.22.04.1_amd64.deb
+nvidia-ctk --version
+
+
+#Step 7: Containerd Configuration in config.toml file 
+#============================================
+sudo nvidia-ctk runtime configure --runtime=containerd
+sudo systemctl restart containerd
+
+
+sleep 10s 
+
+
+#Applying system Configs for Kubernetes
+#++++++++++++++++++++++++++++++++++++++
+
+
+sudo swapoff -a
+sudo sed -i '/ swap / s/^/#/' /etc/fstab
+
+cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+overlay
+br_netfilter
+EOF
+
+sudo modprobe overlay
+sudo modprobe br_netfilter
+
+
+# sysctl params required by setup, params persist across reboots
+cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+EOF
+
+
+
+# Apply sysctl params without reboot
+sudo sysctl --system
+
+sleep 5
+
+
+#Installing Kubernetes dependencies & binaries
+#+++++++++++++++++++++++++++++++++++++++++++++
+
+cd /root/k8-offline/dependency-k8
+cd /root/k8-offline/dependency-k8
+
+
+dpkg -i /root/k8-offline/dependency-k8/*
+sleep 5s 
+
+cd /root/k8-offline/k8
+cd /root/k8-offline/k8
+sleep 5s
+
+dpkg -i /root/k8-offline/k8/*
+sleep 5s
+
+sudo systemctl enable --now kubelet
+sleep 10s
+
+
+
+#Loading Kubernetes images
+#++++++++++++++++++++++++++
+
+
+
+
+cd /root/k8-offline/images
+cd /root/k8-offline/images
+
+image_array=($(ls -all |awk {'print $9'}))
+image_array_length=${#image_array[@]}
+total_images=$((image_array_length-2))
+echo $total_images " images are there"
+
+
+for ((i=2; i<$image_array_length; i++));
+do 
+nerdctl load -i ${image_array[i]} --namespace=k8s.io
+echo "${image_array[i]} has been loaded and image no. is " $i
+done
+
+
+
+#Step 7: Join the Kubernetes cluster on the worker node
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+#run on master node
+#===================
+
+kubeadm token create --print-join-command
+
+#Then execute the command on worker node
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
